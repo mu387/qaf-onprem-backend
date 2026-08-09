@@ -1,0 +1,41 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - development
+      - testing
+      - main
+  pull_request:
+    branches:
+      - development
+      - testing
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show .NET SDK
+        run: dotnet --version
+
+      - name: Restore dependencies
+        run: dotnet restore QAF-OnPrem.slnx
+
+      - name: Build solution
+        run: dotnet build QAF-OnPrem.slnx --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test QAF-OnPrem.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"

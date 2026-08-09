@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+appsettings.Local.json
+artifacts/
+copilot-build-*/
+**/copilot-build/
+src/QafOnPrem.Api/wwwroot/uploads/

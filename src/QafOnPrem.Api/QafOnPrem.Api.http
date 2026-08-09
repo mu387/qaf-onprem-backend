@@ -1,0 +1,6 @@
+@QafOnPrem.Api_HostAddress = http://localhost:5157
+
+GET {{QafOnPrem.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
