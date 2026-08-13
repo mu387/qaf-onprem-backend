@@ -1321,17 +1321,48 @@ public sealed class AppDataController(
         return Ok(Success("Test Suites States", data));
     }
 
-    [HttpGet("testsuite/project")]
-    public async Task<IActionResult> TestSuitesForProject([FromQuery] string? q, [FromQuery] string? tags, [FromQuery(Name = "project_id")] long? projectId, [FromQuery(Name = "test_state_id")] long? testStateId, [FromQuery(Name = "test_suite_type")] int? testSuiteType, CancellationToken cancellationToken = default)
+    [HttpGet("test-suite/tags")]
+    public async Task<IActionResult> GetSharedTestSuiteTags(CancellationToken cancellationToken = default)
     {
-        var data = await _appDataService.GetTestSuitesAsync(User, q, tags, projectId, testStateId, testSuiteType, 1, 0, true, cancellationToken);
+        var data = await _appDataService.GetSharedTestSuiteTagsAsync(User, cancellationToken);
+        return Ok(Success("Shared Test Suite Tags", data));
+    }
+
+    [HttpPatch("test-suite/tags/rename")]
+    public async Task<IActionResult> RenameSharedTestSuiteTag([FromBody] RenameSharedTagRequest request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.OldTag) || string.IsNullOrWhiteSpace(request.NewTag))
+        {
+            return StatusCode(StatusCodes.Status400BadRequest, Failure("old_tag and new_tag are required", StatusCodes.Status400BadRequest));
+        }
+
+        var data = await _appDataService.RenameSharedTestSuiteTagAsync(User, request.OldTag, request.NewTag, cancellationToken);
+        return Ok(Success("Shared Test Suite Tag Renamed", data));
+    }
+
+    [HttpDelete("test-suite/tags")]
+    public async Task<IActionResult> DeleteSharedTestSuiteTag([FromQuery(Name = "tag")] string? tag, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(tag))
+        {
+            return StatusCode(StatusCodes.Status400BadRequest, Failure("tag is required", StatusCodes.Status400BadRequest));
+        }
+
+        var data = await _appDataService.DeleteSharedTestSuiteTagAsync(User, tag, cancellationToken);
+        return Ok(Success("Shared Test Suite Tag Deleted", data));
+    }
+
+    [HttpGet("testsuite/project")]
+    public async Task<IActionResult> TestSuitesForProject([FromQuery] string? q, [FromQuery] string? tags, [FromQuery(Name = "project_id")] long? projectId, [FromQuery(Name = "test_state_id")] long? testStateId, [FromQuery(Name = "test_suite_type")] int? testSuiteType, [FromQuery(Name = "test_plan_item_id")] long? testPlanItemId, CancellationToken cancellationToken = default)
+    {
+        var data = await _appDataService.GetTestSuitesAsync(User, q, tags, projectId, testStateId, testSuiteType, testPlanItemId, 1, 0, true, cancellationToken);
         return Ok(Success("Test Design Aginst Test", data));
     }
 
     [HttpGet("test-suite")]
-    public async Task<IActionResult> TestSuites([FromQuery] string? q, [FromQuery] string? tags, [FromQuery(Name = "project_id")] long? projectId, [FromQuery(Name = "test_state_id")] long? testStateId, [FromQuery(Name = "test_suite_type")] int? testSuiteType, [FromQuery] int page = 1, [FromQuery] int limit = 20, [FromQuery] int? light = 0, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> TestSuites([FromQuery] string? q, [FromQuery] string? tags, [FromQuery(Name = "project_id")] long? projectId, [FromQuery(Name = "test_state_id")] long? testStateId, [FromQuery(Name = "test_suite_type")] int? testSuiteType, [FromQuery(Name = "test_plan_item_id")] long? testPlanItemId, [FromQuery] int page = 1, [FromQuery] int limit = 20, [FromQuery] int? light = 0, CancellationToken cancellationToken = default)
     {
-        var data = await _appDataService.GetTestSuitesAsync(User, q, tags, projectId, testStateId, testSuiteType, NormalizePage(page), NormalizeLimit(limit), light == 1, cancellationToken);
+        var data = await _appDataService.GetTestSuitesAsync(User, q, tags, projectId, testStateId, testSuiteType, testPlanItemId, NormalizePage(page), NormalizeLimit(limit), light == 1, cancellationToken);
         return Ok(Success("Test Design Aginst Test", data));
     }
 

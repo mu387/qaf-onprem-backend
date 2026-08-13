@@ -128,7 +128,10 @@ public interface ISqlAppDataService
     Task<TestPlanItemDto?> UpdateTestPlanItemAsync(ClaimsPrincipal principal, long id, SaveTestPlanItemRequest request, CancellationToken cancellationToken = default);
     Task<bool> DeleteTestPlanItemAsync(ClaimsPrincipal principal, long id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TestStateDto>> GetTestSuiteStatesAsync(CancellationToken cancellationToken = default);
-    Task<object> GetTestSuitesAsync(ClaimsPrincipal principal, string? query, string? tags, long? projectId, long? testStateId, int? testSuiteType, int page, int limit, bool light, CancellationToken cancellationToken = default);
+    Task<object> GetTestSuitesAsync(ClaimsPrincipal principal, string? query, string? tags, long? projectId, long? testStateId, int? testSuiteType, long? testPlanItemId, int page, int limit, bool light, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> GetSharedTestSuiteTagsAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> RenameSharedTestSuiteTagAsync(ClaimsPrincipal principal, string oldTag, string newTag, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> DeleteSharedTestSuiteTagAsync(ClaimsPrincipal principal, string tag, CancellationToken cancellationToken = default);
     Task<byte[]> ExportTestSuitesMatrixAsync(ClaimsPrincipal principal, string? query, string? tags, long? projectId, long? testStateId, int? testSuiteType, CancellationToken cancellationToken = default);
     Task<TestSuiteMatrixValidationDto> ValidateTestSuitesMatrixAsync(ClaimsPrincipal principal, Stream stream, CancellationToken cancellationToken = default);
     Task<ImportTestSuitesResultDto> ImportTestSuitesMatrixAsync(ClaimsPrincipal principal, Stream stream, CancellationToken cancellationToken = default);

@@ -4302,7 +4302,7 @@ public sealed partial class SqlAppDataService(
         return Convert.ToInt64(result);
     }
 
-    public async Task<object> GetTestSuitesAsync(ClaimsPrincipal principal, string? query, string? tags, long? projectId, long? testStateId, int? testSuiteType, int page, int limit, bool light, CancellationToken cancellationToken = default)
+    public async Task<object> GetTestSuitesAsync(ClaimsPrincipal principal, string? query, string? tags, long? projectId, long? testStateId, int? testSuiteType, long? testPlanItemId, int page, int limit, bool light, CancellationToken cancellationToken = default)
     {
         var context = GetRequestContext(principal);
         if (!context.ClientId.HasValue)
@@ -4332,6 +4332,20 @@ public sealed partial class SqlAppDataService(
         {
             whereClauses.Add("td.test_suite_type = @testSuiteType");
             parameters.Add(new SqlParameter("@testSuiteType", testSuiteType.Value));
+        }
+
+        if (testPlanItemId.HasValue)
+        {
+            whereClauses.Add("""
+                NOT EXISTS (
+                    SELECT 1
+                    FROM test_plan_item_suites tpis
+                    WHERE tpis.test_plan_item_id = @testPlanItemId
+                      AND tpis.test_design_id = td.id
+                      AND tpis.deleted_at IS NULL
+                )
+                """);
+            parameters.Add(new SqlParameter("@testPlanItemId", testPlanItemId.Value));
         }
 
         var whereSql = string.Join(" AND ", whereClauses);
@@ -4414,6 +4428,225 @@ public sealed partial class SqlAppDataService(
         }
 
         return limit > 0 ? CreatePagedData(rows, total, limit) : rows;
+    }
+
+    public async Task<IReadOnlyList<string>> GetSharedTestSuiteTagsAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default)
+    {
+        var context = GetRequestContext(principal);
+        if (!context.ClientId.HasValue)
+        {
+            return Array.Empty<string>();
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        const string sql = """
+            SELECT tags
+            FROM test_designs
+            WHERE client_id = @clientId
+              AND parent_id IS NULL
+              AND deleted_at IS NULL
+              AND tags IS NOT NULL;
+            """;
+
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var command = CreateCommand(connection, sql);
+        command.Parameters.AddWithValue("@clientId", context.ClientId.Value);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            foreach (var tag in ParseTags(GetString(reader, "tags")))
+            {
+                if (!string.IsNullOrWhiteSpace(tag))
+                {
+                    results.Add(tag.Trim());
+                }
+            }
+        }
+
+        return results
+            .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<string>> RenameSharedTestSuiteTagAsync(ClaimsPrincipal principal, string oldTag, string newTag, CancellationToken cancellationToken = default)
+    {
+        var context = GetRequestContext(principal);
+        if (!context.ClientId.HasValue)
+        {
+            return Array.Empty<string>();
+        }
+
+        var normalizedOldTag = oldTag.Trim();
+        var normalizedNewTag = newTag.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedOldTag) || string.IsNullOrWhiteSpace(normalizedNewTag))
+        {
+            return await GetSharedTestSuiteTagsAsync(principal, cancellationToken);
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        const string selectSql = """
+            SELECT id, tags
+            FROM test_designs
+            WHERE client_id = @clientId
+              AND parent_id IS NULL
+              AND deleted_at IS NULL
+              AND tags IS NOT NULL;
+            """;
+
+        var updates = new List<(long Id, string Tags)>();
+        await using (var selectCommand = CreateCommand(connection, selectSql))
+        {
+            selectCommand.Parameters.AddWithValue("@clientId", context.ClientId.Value);
+            await using var reader = await selectCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var existingTags = ParseTags(GetString(reader, "tags")).ToList();
+                if (existingTags.Count == 0)
+                {
+                    continue;
+                }
+
+                var renamed = false;
+                for (var i = 0; i < existingTags.Count; i++)
+                {
+                    if (string.Equals(existingTags[i], normalizedOldTag, StringComparison.OrdinalIgnoreCase))
+                    {
+                        existingTags[i] = normalizedNewTag;
+                        renamed = true;
+                    }
+                }
+
+                if (!renamed)
+                {
+                    continue;
+                }
+
+                var normalizedJson = NormalizeSuiteTags(JsonSerializer.SerializeToElement(existingTags.ToArray()));
+                if (!string.IsNullOrWhiteSpace(normalizedJson))
+                {
+                    updates.Add((reader.GetInt64(reader.GetOrdinal("id")), normalizedJson));
+                }
+            }
+        }
+
+        if (updates.Count > 0)
+        {
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                const string updateSql = """
+                    UPDATE test_designs
+                    SET tags = @tags,
+                        updated_at = SYSUTCDATETIME()
+                    WHERE id = @id
+                      AND client_id = @clientId
+                      AND deleted_at IS NULL;
+                    """;
+
+                foreach (var update in updates)
+                {
+                    await using var updateCommand = CreateCommand(connection, updateSql);
+                    updateCommand.Transaction = transaction;
+                    updateCommand.Parameters.AddWithValue("@id", update.Id);
+                    updateCommand.Parameters.AddWithValue("@clientId", context.ClientId.Value);
+                    updateCommand.Parameters.AddWithValue("@tags", update.Tags);
+                    await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        return await GetSharedTestSuiteTagsAsync(principal, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<string>> DeleteSharedTestSuiteTagAsync(ClaimsPrincipal principal, string tag, CancellationToken cancellationToken = default)
+    {
+        var context = GetRequestContext(principal);
+        if (!context.ClientId.HasValue)
+        {
+            return Array.Empty<string>();
+        }
+
+        var normalizedTag = tag.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedTag))
+        {
+            return await GetSharedTestSuiteTagsAsync(principal, cancellationToken);
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        const string selectSql = """
+            SELECT id, tags
+            FROM test_designs
+            WHERE client_id = @clientId
+              AND parent_id IS NULL
+              AND deleted_at IS NULL
+              AND tags IS NOT NULL;
+            """;
+
+        var updates = new List<(long Id, string? Tags)>();
+        await using (var selectCommand = CreateCommand(connection, selectSql))
+        {
+            selectCommand.Parameters.AddWithValue("@clientId", context.ClientId.Value);
+            await using var reader = await selectCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var remaining = ParseTags(GetString(reader, "tags"))
+                    .Where(existing => !string.Equals(existing, normalizedTag, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+
+                var existingTags = ParseTags(GetString(reader, "tags")).ToArray();
+                if (remaining.Length == existingTags.Length)
+                {
+                    continue;
+                }
+
+                var normalizedJson = remaining.Length > 0
+                    ? NormalizeSuiteTags(JsonSerializer.SerializeToElement(remaining))
+                    : null;
+                updates.Add((reader.GetInt64(reader.GetOrdinal("id")), normalizedJson));
+            }
+        }
+
+        if (updates.Count > 0)
+        {
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                const string updateSql = """
+                    UPDATE test_designs
+                    SET tags = @tags,
+                        updated_at = SYSUTCDATETIME()
+                    WHERE id = @id
+                      AND client_id = @clientId
+                      AND deleted_at IS NULL;
+                    """;
+
+                foreach (var update in updates)
+                {
+                    await using var updateCommand = CreateCommand(connection, updateSql);
+                    updateCommand.Transaction = transaction;
+                    updateCommand.Parameters.AddWithValue("@id", update.Id);
+                    updateCommand.Parameters.AddWithValue("@clientId", context.ClientId.Value);
+                    updateCommand.Parameters.AddWithValue("@tags", (object?)update.Tags ?? DBNull.Value);
+                    await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        return await GetSharedTestSuiteTagsAsync(principal, cancellationToken);
     }
 
     public async Task<TestSuiteFullDto?> GetTestSuiteFullAsync(ClaimsPrincipal principal, long testSuiteId, CancellationToken cancellationToken = default)
