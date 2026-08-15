@@ -32,10 +32,10 @@ jobs:
         run: dotnet --version
 
       - name: Restore dependencies
-        run: dotnet restore QAF-OnPrem.slnx
+        run: dotnet restore QafOnPrem.slnx
 
       - name: Build solution
-        run: dotnet build QAF-OnPrem.slnx --configuration Release --no-restore
+        run: dotnet build QafOnPrem.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test QAF-OnPrem.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test QafOnPrem.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
