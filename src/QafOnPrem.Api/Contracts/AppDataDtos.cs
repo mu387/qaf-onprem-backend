@@ -1252,6 +1252,15 @@ public sealed class SaveTestSuiteDetailsRequest
     public bool? ReleaseNotesReady { get; init; }
 }
 
+public sealed class RenameSharedTagRequest
+{
+    [JsonPropertyName("old_tag")]
+    public string? OldTag { get; init; }
+
+    [JsonPropertyName("new_tag")]
+    public string? NewTag { get; init; }
+}
+
 public sealed class SaveTestSuiteStepRequest
 {
     [JsonPropertyName("display_id")]

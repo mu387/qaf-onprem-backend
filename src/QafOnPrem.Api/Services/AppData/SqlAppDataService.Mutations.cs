@@ -294,7 +294,7 @@ public sealed partial class SqlAppDataService
 
     public async Task<byte[]> ExportTestSuitesMatrixAsync(ClaimsPrincipal principal, string? query, string? tags, long? projectId, long? testStateId, int? testSuiteType, CancellationToken cancellationToken = default)
     {
-        var suitesPayload = await GetTestSuitesAsync(principal, query, tags, projectId, testStateId, testSuiteType, 1, 0, true, cancellationToken);
+        var suitesPayload = await GetTestSuitesAsync(principal, query, tags, projectId, testStateId, testSuiteType, null, 1, 0, true, cancellationToken);
         var suites = suitesPayload as IReadOnlyList<TestSuiteListDto> ?? [];
         var requirementsRows = new List<RequirementsSheetRow>();
         var testDataRows = new List<TestDataSheetRow>();
@@ -3234,7 +3234,7 @@ public sealed partial class SqlAppDataService
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var defaultStateId = await LoadDefaultTestStateIdAsync(connection, cancellationToken);
         var components = await LoadComponentCatalogAsync(connection, context.ClientId.Value, cancellationToken);
-        var suitesPayload = await GetTestSuitesAsync(principal, null, null, null, null, null, 1, 0, true, cancellationToken);
+        var suitesPayload = await GetTestSuitesAsync(principal, null, null, null, null, null, null, 1, 0, true, cancellationToken);
         var suites = suitesPayload as IReadOnlyList<TestSuiteListDto> ?? [];
 
         var suiteById = suites.ToDictionary(item => item.Id, item => item);
