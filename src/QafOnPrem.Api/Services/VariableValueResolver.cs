@@ -1,4 +1,5 @@
 using System.Globalization;
+using ClosedXML.Excel;
 
 namespace QafOnPrem.Api.Services;
 
@@ -42,6 +43,17 @@ internal static class VariableValueResolver
 
         try
         {
+            if (TryResolveWithWorkbookEngine(rawFormula, out resolved))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
             var parser = new ExcelFormulaParser(rawFormula);
             resolved = ToText(parser.Parse());
             return true;
@@ -51,6 +63,42 @@ internal static class VariableValueResolver
             resolved = rawFormula;
             return false;
         }
+    }
+
+    private static bool TryResolveWithWorkbookEngine(string rawFormula, out string resolved)
+    {
+        resolved = rawFormula;
+
+        var formula = rawFormula.Trim();
+        if (!formula.StartsWith("=", StringComparison.Ordinal))
+        {
+            resolved = formula;
+            return true;
+        }
+
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Formula");
+        var cell = worksheet.Cell("A1");
+        cell.FormulaA1 = formula[1..];
+
+        var value = cell.Value;
+        if (value.IsError)
+        {
+            return false;
+        }
+
+        resolved = value.Type switch
+        {
+            XLDataType.DateTime => value.GetDateTime().ToString(CultureInfo.InvariantCulture),
+            XLDataType.TimeSpan => value.GetTimeSpan().ToString("c", CultureInfo.InvariantCulture),
+            XLDataType.Boolean => value.GetBoolean() ? "TRUE" : "FALSE",
+            XLDataType.Number => ToText(value.GetNumber()),
+            XLDataType.Text => value.GetText(),
+            XLDataType.Blank => string.Empty,
+            _ => value.ToString(CultureInfo.InvariantCulture)
+        };
+
+        return true;
     }
 
     private static string ToText(object? value)
