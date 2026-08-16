@@ -10586,37 +10586,50 @@ public sealed partial class SqlAppDataService(
             return InvalidFlowReference("components", "The component_id and project_id fields are required.");
         }
 
-        var referenceParameters = new List<SqlParameter> { new("@clientId", clientId) };
-        var componentPlaceholders = AddIdListParameters(referenceParameters, "@componentId", componentIds);
-        var projectPlaceholders = AddIdListParameters(referenceParameters, "@projectId", projectIds);
-        var referenceSql = $"""
-            SELECT c.id, c.project_id
-            FROM components c
-            INNER JOIN projects p ON p.id = c.project_id AND p.client_id = @clientId
-            WHERE c.client_id = @clientId
-              AND c.deleted_at IS NULL
-              AND c.id IN ({string.Join(", ", componentPlaceholders)})
-              AND c.project_id IN ({string.Join(", ", projectPlaceholders)});
-            """;
-        var validReferences = new HashSet<(long ComponentId, long ProjectId)>();
-        await using (var command = CreateCommand(connection, referenceSql))
+        var projectParameters = new List<SqlParameter> { new("@clientId", clientId) };
+        var projectPlaceholders = AddIdListParameters(projectParameters, "@projectId", projectIds);
+        var projectSql = $"SELECT id FROM projects WHERE client_id = @clientId AND id IN ({string.Join(", ", projectPlaceholders)});";
+        var validProjectIds = new HashSet<long>();
+        await using (var command = CreateCommand(connection, projectSql))
         {
-            AddParameters(command, referenceParameters);
+            AddParameters(command, projectParameters);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var componentId = GetInt64(reader, "id");
-                var projectId = GetInt64(reader, "project_id");
-                if (componentId.HasValue && projectId.HasValue)
+                var projectId = GetInt64(reader, "id");
+                if (projectId.HasValue)
                 {
-                    validReferences.Add((componentId.Value, projectId.Value));
+                    validProjectIds.Add(projectId.Value);
                 }
             }
         }
 
-        if (request.Components.Any(item => !validReferences.Contains((item.ComponentId!.Value, item.ProjectId!.Value))))
+        if (request.Components.Any(item => !validProjectIds.Contains(item.ProjectId!.Value)))
         {
-            return InvalidFlowReference("components.component_id", "One or more selected component/project references are invalid.");
+            return InvalidFlowReference("components.project_id", "One or more selected project_id values are invalid.");
+        }
+
+        var componentParameters = new List<SqlParameter> { new("@clientId", clientId) };
+        var componentPlaceholders = AddIdListParameters(componentParameters, "@componentId", componentIds);
+        var componentSql = $"SELECT id FROM components WHERE client_id = @clientId AND deleted_at IS NULL AND id IN ({string.Join(", ", componentPlaceholders)});";
+        var validComponentIds = new HashSet<long>();
+        await using (var command = CreateCommand(connection, componentSql))
+        {
+            AddParameters(command, componentParameters);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var componentId = GetInt64(reader, "id");
+                if (componentId.HasValue)
+                {
+                    validComponentIds.Add(componentId.Value);
+                }
+            }
+        }
+
+        if (request.Components.Any(item => !validComponentIds.Contains(item.ComponentId!.Value)))
+        {
+            return InvalidFlowReference("components.component_id", "One or more selected component_id values are invalid.");
         }
 
         var persistedIds = request.Components.Where(item => item.TestComponentId.HasValue).Select(item => item.TestComponentId!.Value).ToArray();
@@ -10633,30 +10646,28 @@ public sealed partial class SqlAppDataService(
         var persistedParameters = new List<SqlParameter> { new("@suiteId", suiteId) };
         var persistedPlaceholders = AddIdListParameters(persistedParameters, "@testComponentId", persistedIds);
         var persistedSql = $"""
-            SELECT id, component_id, project_id
+            SELECT id
             FROM test_components
             WHERE test_design_id = @suiteId
               AND deleted_at IS NULL
               AND id IN ({string.Join(", ", persistedPlaceholders)});
             """;
-        var existing = new Dictionary<long, (long? ComponentId, long? ProjectId)>();
+        var existing = new HashSet<long>();
         await using (var command = CreateCommand(connection, persistedSql))
         {
             AddParameters(command, persistedParameters);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                existing[reader.GetInt64(reader.GetOrdinal("id"))] = (GetInt64(reader, "component_id"), GetInt64(reader, "project_id"));
+                existing.Add(reader.GetInt64(reader.GetOrdinal("id")));
             }
         }
 
         foreach (var requested in request.Components.Where(item => item.TestComponentId.HasValue))
         {
-            if (!existing.TryGetValue(requested.TestComponentId!.Value, out var row)
-                || row.ComponentId != requested.ComponentId
-                || row.ProjectId != requested.ProjectId)
+            if (!existing.Contains(requested.TestComponentId!.Value))
             {
-                return InvalidFlowReference("components.test_component_id", "A test_component_id does not belong to this test suite or does not match its component reference.");
+                return InvalidFlowReference("components.test_component_id", "A test_component_id does not belong to this test suite.");
             }
         }
 
@@ -10723,7 +10734,8 @@ public sealed partial class SqlAppDataService(
                 remainingIds.Remove(testComponentId.Value);
                 const string updateSql = """
                     UPDATE test_components
-                    SET project_id = @projectId,
+                    SET component_id = @componentId,
+                        project_id = @projectId,
                         status = @status,
                         sort_order = @sortOrder,
                         updated_at = SYSUTCDATETIME()
@@ -10733,6 +10745,7 @@ public sealed partial class SqlAppDataService(
                 updateCommand.Transaction = transaction;
                 updateCommand.Parameters.AddWithValue("@id", testComponentId.Value);
                 updateCommand.Parameters.AddWithValue("@suiteId", suiteId);
+                updateCommand.Parameters.AddWithValue("@componentId", requested.ComponentId!.Value);
                 updateCommand.Parameters.AddWithValue("@projectId", requested.ProjectId!.Value);
                 updateCommand.Parameters.AddWithValue("@status", requested.Status ?? true);
                 updateCommand.Parameters.AddWithValue("@sortOrder", sortOrder);
