@@ -4200,6 +4200,7 @@ public sealed partial class SqlAppDataService(
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
+        await EnsureTestPlanItemSortOrderColumnAsync(connection, null, cancellationToken);
         var parameters = new List<SqlParameter> { new("@clientId", context.ClientId.Value) };
         const string countSql = """
             SELECT COUNT(*)
@@ -4210,11 +4211,11 @@ public sealed partial class SqlAppDataService(
         var total = await ExecuteCountAsync(connection, countSql, parameters, cancellationToken);
 
         const string sql = """
-            SELECT tpi.id, tpi.name, tpi.test_plan_id
+            SELECT tpi.id, tpi.name, tpi.test_plan_id, tpi.sort_order
             FROM test_plan_items tpi
             INNER JOIN test_plans tp ON tp.id = tpi.test_plan_id
             WHERE tp.client_id = @clientId
-            ORDER BY tpi.id DESC
+            ORDER BY ISNULL(tpi.sort_order, 2147483647), tpi.id
             OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
             """;
 
@@ -4230,7 +4231,8 @@ public sealed partial class SqlAppDataService(
             {
                 Id = reader.GetInt64(reader.GetOrdinal("id")),
                 Name = GetString(reader, "name"),
-                TestPlanId = GetInt64(reader, "test_plan_id")
+                TestPlanId = GetInt64(reader, "test_plan_id"),
+                SortOrder = GetInt32(reader, "sort_order")
             });
         }
 
@@ -4246,12 +4248,13 @@ public sealed partial class SqlAppDataService(
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
+        await EnsureTestPlanItemSortOrderColumnAsync(connection, null, cancellationToken);
         const string sql = """
-            SELECT tpi.id, tpi.name, tpi.test_plan_id
+            SELECT tpi.id, tpi.name, tpi.test_plan_id, tpi.sort_order
             FROM test_plan_items tpi
             INNER JOIN test_plans tp ON tp.id = tpi.test_plan_id
             WHERE tpi.test_plan_id = @testPlanId AND tp.client_id = @clientId
-            ORDER BY tpi.id DESC;
+            ORDER BY ISNULL(tpi.sort_order, 2147483647), tpi.id;
             """;
 
         await using var command = CreateCommand(connection, sql);
@@ -4265,7 +4268,8 @@ public sealed partial class SqlAppDataService(
             {
                 Id = reader.GetInt64(reader.GetOrdinal("id")),
                 Name = GetString(reader, "name"),
-                TestPlanId = GetInt64(reader, "test_plan_id")
+                TestPlanId = GetInt64(reader, "test_plan_id"),
+                SortOrder = GetInt32(reader, "sort_order")
             });
         }
 
