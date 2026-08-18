@@ -1490,10 +1490,22 @@ public sealed partial class SqlAppDataService
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
+        await EnsureTestPlanItemSortOrderColumnAsync(connection, null, cancellationToken);
         const string sql = """
-            INSERT INTO test_plan_items (name, test_plan_id, client_id, created_at, updated_at)
+            INSERT INTO test_plan_items (name, test_plan_id, client_id, sort_order, created_at, updated_at)
             OUTPUT INSERTED.id
-            VALUES (@name, @testPlanId, @clientId, SYSUTCDATETIME(), SYSUTCDATETIME());
+            VALUES (
+                @name,
+                @testPlanId,
+                @clientId,
+                (
+                    SELECT ISNULL(MAX(ISNULL(sort_order, 0)), 0) + 1
+                    FROM test_plan_items
+                    WHERE test_plan_id = @testPlanId
+                ),
+                SYSUTCDATETIME(),
+                SYSUTCDATETIME()
+            );
             """;
 
         await using var command = CreateCommand(connection, sql);
@@ -1501,7 +1513,7 @@ public sealed partial class SqlAppDataService
         command.Parameters.AddWithValue("@testPlanId", request.TestPlanId!.Value);
         command.Parameters.AddWithValue("@clientId", context.ClientId.Value);
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
-        return new TestPlanItemDto { Id = id, Name = request.Name.Trim(), TestPlanId = request.TestPlanId };
+        return await GetTestPlanItemByIdAsync(connection, context.ClientId.Value, id, cancellationToken);
     }
 
     public async Task<TestPlanItemDto?> UpdateTestPlanItemAsync(ClaimsPrincipal principal, long id, SaveTestPlanItemRequest request, CancellationToken cancellationToken = default)
@@ -1788,6 +1800,51 @@ public sealed partial class SqlAppDataService
                 command.Transaction = transaction;
                 command.Parameters.AddWithValue("@sortOrder", index + 1);
                 command.Parameters.AddWithValue("@id", ids[index]);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return true;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<bool> SortTestPlanItemsAsync(ClaimsPrincipal principal, IReadOnlyList<long> ids, CancellationToken cancellationToken = default)
+    {
+        if (ids.Count == 0)
+        {
+            return true;
+        }
+
+        var context = GetRequestContext(principal);
+        if (!context.ClientId.HasValue)
+        {
+            return false;
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await EnsureTestPlanItemSortOrderColumnAsync(connection, null, cancellationToken);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            for (var index = 0; index < ids.Count; index++)
+            {
+                await using var command = CreateCommand(connection, """
+                    UPDATE tpi
+                    SET tpi.sort_order = @sortOrder,
+                        tpi.updated_at = SYSUTCDATETIME()
+                    FROM test_plan_items tpi
+                    INNER JOIN test_plans tp ON tp.id = tpi.test_plan_id
+                    WHERE tpi.id = @id AND tp.client_id = @clientId;
+                    """);
+                command.Transaction = transaction;
+                command.Parameters.AddWithValue("@sortOrder", index + 1);
+                command.Parameters.AddWithValue("@id", ids[index]);
+                command.Parameters.AddWithValue("@clientId", context.ClientId.Value);
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -2618,8 +2675,9 @@ public sealed partial class SqlAppDataService
 
     private async Task<TestPlanItemDto?> GetTestPlanItemByIdAsync(SqlConnection connection, long clientId, long id, CancellationToken cancellationToken)
     {
+        await EnsureTestPlanItemSortOrderColumnAsync(connection, null, cancellationToken);
         const string sql = """
-            SELECT tpi.id, tpi.name, tpi.test_plan_id
+            SELECT tpi.id, tpi.name, tpi.test_plan_id, tpi.sort_order
             FROM test_plan_items tpi
             INNER JOIN test_plans tp ON tp.id = tpi.test_plan_id
             WHERE tpi.id = @id AND tp.client_id = @clientId;
@@ -2638,8 +2696,41 @@ public sealed partial class SqlAppDataService
         {
             Id = reader.GetInt64(reader.GetOrdinal("id")),
             Name = GetString(reader, "name"),
-            TestPlanId = GetInt64(reader, "test_plan_id")
+            TestPlanId = GetInt64(reader, "test_plan_id"),
+            SortOrder = GetInt32(reader, "sort_order")
         };
+    }
+
+    private async Task EnsureTestPlanItemSortOrderColumnAsync(SqlConnection connection, SqlTransaction? transaction, CancellationToken cancellationToken)
+    {
+        await using (var ensureColumn = CreateCommand(connection, """
+            IF COL_LENGTH('test_plan_items', 'sort_order') IS NULL
+            BEGIN
+                ALTER TABLE test_plan_items ADD sort_order INT NULL;
+            END
+            """))
+        {
+            ensureColumn.Transaction = transaction;
+            await ensureColumn.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var backfill = CreateCommand(connection, """
+            ;WITH ordered AS (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (PARTITION BY test_plan_id ORDER BY ISNULL(sort_order, 2147483647), id) AS next_sort_order
+                FROM test_plan_items
+            )
+            UPDATE tpi
+            SET sort_order = ordered.next_sort_order
+            FROM test_plan_items tpi
+            INNER JOIN ordered ON ordered.id = tpi.id
+            WHERE tpi.sort_order IS NULL;
+            """))
+        {
+            backfill.Transaction = transaction;
+            await backfill.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     private async Task CopyPlanUsersToSuiteAsync(SqlConnection connection, SqlTransaction transaction, long testPlanItemId, long suiteLinkId, CancellationToken cancellationToken)
