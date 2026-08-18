@@ -127,6 +127,7 @@ public interface ISqlAppDataService
     Task<TestPlanItemDto?> CreateTestPlanItemAsync(ClaimsPrincipal principal, SaveTestPlanItemRequest request, CancellationToken cancellationToken = default);
     Task<TestPlanItemDto?> UpdateTestPlanItemAsync(ClaimsPrincipal principal, long id, SaveTestPlanItemRequest request, CancellationToken cancellationToken = default);
     Task<bool> DeleteTestPlanItemAsync(ClaimsPrincipal principal, long id, CancellationToken cancellationToken = default);
+    Task<bool> SortTestPlanItemsAsync(ClaimsPrincipal principal, IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TestStateDto>> GetTestSuiteStatesAsync(CancellationToken cancellationToken = default);
     Task<object> GetTestSuitesAsync(ClaimsPrincipal principal, string? query, string? tags, long? projectId, long? testStateId, int? testSuiteType, long? testPlanItemId, int page, int limit, bool light, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> GetSharedTestSuiteTagsAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default);

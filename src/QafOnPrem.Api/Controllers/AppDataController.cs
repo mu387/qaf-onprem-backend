@@ -1296,6 +1296,15 @@ public sealed class AppDataController(
             : StatusCode(StatusCodes.Status400BadRequest, Failure("Unable to sort test suites", StatusCodes.Status400BadRequest));
     }
 
+    [HttpPost("sort/testplanitems")]
+    public async Task<IActionResult> SortTestPlanItems([FromBody] RemovePlanItemSuitesRequest request, CancellationToken cancellationToken = default)
+    {
+        var sorted = await _appDataService.SortTestPlanItemsAsync(User, request.Ids, cancellationToken);
+        return sorted
+            ? Ok(Success("Test Plan Items Sorted Successfully", Array.Empty<object>()))
+            : StatusCode(StatusCodes.Status400BadRequest, Failure("Unable to sort test plan items", StatusCodes.Status400BadRequest));
+    }
+
     [HttpPut("update/users/against/testplanitems/suite")]
     public async Task<IActionResult> UpdatePlanItemSuiteUsers([FromBody] UpdatePlanItemSuiteUsersRequest request, CancellationToken cancellationToken = default)
     {

@@ -998,6 +998,9 @@ public sealed class TestPlanItemDto
 
     [JsonPropertyName("test_plan_id")]
     public long? TestPlanId { get; init; }
+
+    [JsonPropertyName("sort_order")]
+    public int? SortOrder { get; init; }
 }
 
 public sealed class TestStateDto
