@@ -1171,7 +1171,7 @@ public sealed partial class SqlAppDataService
 
             if (queueItem.TestPlanItemId.HasValue)
             {
-                await UpdateExecutionPlanSuiteStatusAsync(connection, transaction, queueItem.TestPlanItemId.Value, executionId, InProgressStatusId, cancellationToken);
+                await UpdateExecutionPlanSuiteStatusAsync(connection, transaction, queueItem.TestPlanItemId.Value, executionId, NotStartedStatusId, cancellationToken);
             }
 
             await RefreshExecutionQueueStatusAsync(connection, transaction, id, cancellationToken);
@@ -2641,8 +2641,12 @@ public sealed partial class SqlAppDataService
         var anyInterrupted = statuses.Any(status => status == "interrupted");
         var anyQueued = statuses.Any(status => status is "queued" or "not_started");
         var allComplete = statuses.All(status => status is "passed" or "failed" or "glitch");
-        var queueStatus = anyRunning || anyInterrupted || anyQueued
+        var queueStatus = anyRunning
             ? "running"
+            : anyInterrupted
+                ? "interrupted"
+                : anyQueued
+                    ? "running"
             : allComplete && anyFailed
                 ? "failed"
                 : allComplete
