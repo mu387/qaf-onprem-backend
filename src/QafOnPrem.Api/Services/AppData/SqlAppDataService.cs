@@ -11197,6 +11197,7 @@ public sealed partial class SqlAppDataService(
             insertCommand.Parameters.AddWithValue("@iterationPath", (object?)NormalizeOptionalText(details.IterationPath) ?? DBNull.Value);
             insertCommand.Parameters.AddWithValue("@priority", (object?)NormalizeOptionalText(details.Priority) ?? DBNull.Value);
             insertCommand.Parameters.AddWithValue("@storyId", (object?)NormalizeOptionalText(details.StoryId) ?? DBNull.Value);
+            insertCommand.Parameters.AddWithValue("@overview", (object?)NormalizeOptionalText(details.Overview) ?? DBNull.Value);
             insertCommand.Parameters.AddWithValue("@testTitle", (object?)NormalizeOptionalText(details.TestTitle) ?? DBNull.Value);
             insertCommand.Parameters.AddWithValue("@tags", (object?)normalizedTags ?? DBNull.Value);
             insertCommand.Parameters.AddWithValue("@comment", (object?)NormalizeOptionalText(details.Comment) ?? DBNull.Value);
