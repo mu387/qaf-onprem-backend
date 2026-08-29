@@ -2097,9 +2097,9 @@ public sealed class AppDataController(
 
     private IActionResult? ValidateGetTestSuiteStepsRequest(GetTestSuiteStepsRequest request)
     {
-        if (request.TestSuites.Count == 0)
+        if (request.TestSuites.Count == 0 && request.SuitePoints.Count == 0)
         {
-            return ValidationFailure("test_suites", "The test_suites field is required.");
+            return ValidationFailure("test_suites", "The test_suites or suite_points field is required.");
         }
 
         if (!request.TestPlanItemId.HasValue && request.InvokedViaTests != true)

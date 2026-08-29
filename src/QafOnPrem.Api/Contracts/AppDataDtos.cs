@@ -1167,6 +1167,9 @@ public sealed class TestSuiteFullDto
     [JsonPropertyName("comment")]
     public string? Comment { get; init; }
 
+    [JsonPropertyName("overview")]
+    public string? Overview { get; init; }
+
     [JsonPropertyName("project_id")]
     public long? ProjectId { get; init; }
 
@@ -1223,6 +1226,9 @@ public sealed class SaveTestSuiteDetailsRequest
 
     [JsonPropertyName("comment")]
     public string? Comment { get; init; }
+
+    [JsonPropertyName("overview")]
+    public string? Overview { get; init; }
 
     [JsonPropertyName("project_id")]
     public long? ProjectId { get; init; }
@@ -1568,6 +1574,15 @@ public sealed class SaveAndCloseTestSuiteRequest
 
     [JsonPropertyName("test_plan_item_id")]
     public long? TestPlanItemId { get; init; }
+
+    [JsonPropertyName("test_plan_item_suite_id")]
+    public long? TestPlanItemSuiteId { get; init; }
+
+    [JsonPropertyName("configuration_id")]
+    public long? ConfigurationId { get; init; }
+
+    [JsonPropertyName("test_design_dataset_id")]
+    public long? TestDesignDatasetId { get; init; }
 }
 
 public sealed class PauseTestSuiteRequest
@@ -1583,6 +1598,21 @@ public sealed class PauseTestSuiteRequest
 
     [JsonPropertyName("test_plan_item_id")]
     public long? TestPlanItemId { get; init; }
+
+    [JsonPropertyName("test_plan_item_suite_id")]
+    public long? TestPlanItemSuiteId { get; init; }
+
+    [JsonPropertyName("configuration_id")]
+    public long? ConfigurationId { get; init; }
+
+    [JsonPropertyName("test_design_dataset_id")]
+    public long? TestDesignDatasetId { get; init; }
+
+    [JsonPropertyName("current_test_index")]
+    public int? CurrentTestIndex { get; init; }
+
+    [JsonPropertyName("suite_points")]
+    public IReadOnlyList<SuiteExecutionPointRequest> SuitePoints { get; init; } = [];
 
     [JsonPropertyName("resume_step_id")]
     public long? ResumeStepId { get; init; }
@@ -1644,6 +1674,15 @@ public sealed class GetTestSuiteStepsRequest
 
     [JsonPropertyName("test_suites")]
     public IReadOnlyList<long> TestSuites { get; init; } = [];
+    
+    [JsonPropertyName("suite_points")]
+    public IReadOnlyList<SuiteExecutionPointRequest> SuitePoints { get; init; } = [];
+    
+    [JsonPropertyName("fresh_run")]
+    public bool? FreshRun { get; init; }
+    
+    [JsonPropertyName("resume_runner_id")]
+    public long? ResumeRunnerId { get; init; }
 }
 
 public sealed class TestRunnerPayloadDto
@@ -1683,6 +1722,9 @@ public sealed class RunnerSuiteHeaderDto
 
     [JsonPropertyName("base_test_suite_id")]
     public long? BaseTestSuiteId { get; init; }
+    
+    [JsonPropertyName("test_plan_item_suite_id")]
+    public long? TestPlanItemSuiteId { get; init; }
 
     [JsonPropertyName("name")]
     public string? Name { get; init; }
@@ -1692,6 +1734,18 @@ public sealed class RunnerSuiteHeaderDto
 
     [JsonPropertyName("prereq")]
     public string? Prereq { get; init; }
+    
+    [JsonPropertyName("overview")]
+    public string? Overview { get; init; }
+    
+    [JsonPropertyName("configuration_id")]
+    public long? ConfigurationId { get; init; }
+    
+    [JsonPropertyName("test_design_dataset_id")]
+    public long? TestDesignDatasetId { get; init; }
+    
+    [JsonPropertyName("dataset_scenario")]
+    public string? DatasetScenario { get; init; }
 
     [JsonPropertyName("configuration")]
     public SuiteConfigurationDto? Configuration { get; init; }
@@ -1789,6 +1843,18 @@ public sealed class TestPlanItemSuiteLightDto
     [JsonPropertyName("test_design_id")]
     public long? TestDesignId { get; init; }
 
+    [JsonPropertyName("test_plan_item_suite_id")]
+    public long? TestPlanItemSuiteId { get; init; }
+
+    [JsonPropertyName("configuration_id")]
+    public long? ConfigurationId { get; init; }
+
+    [JsonPropertyName("test_design_dataset_id")]
+    public long? TestDesignDatasetId { get; init; }
+
+    [JsonPropertyName("dataset_scenario")]
+    public string? DatasetScenario { get; init; }
+
     [JsonPropertyName("parent_id")]
     public long? ParentId { get; init; }
 
@@ -1851,6 +1917,15 @@ public sealed class TestRunnerLogItemDto
 
     [JsonPropertyName("configuration_variables")]
     public IReadOnlyList<ConfigurationSelectedVariableDto> ConfigurationVariables { get; init; } = [];
+    
+    [JsonPropertyName("test_plan_item_suite_id")]
+    public long? TestPlanItemSuiteId { get; init; }
+    
+    [JsonPropertyName("configuration_id")]
+    public long? ConfigurationId { get; init; }
+    
+    [JsonPropertyName("test_design_dataset_id")]
+    public long? TestDesignDatasetId { get; init; }
 
     [JsonPropertyName("is_favorite")]
     public bool IsFavorite { get; init; }
@@ -2328,6 +2403,21 @@ public sealed class AddSuitesToPlanItemRequest
 {
     [JsonPropertyName("test_plan_item_id")]
     public long TestPlanItemId { get; init; }
+    
+    [JsonPropertyName("test_plan_item_suite_id")]
+    public long? TestPlanItemSuiteId { get; init; }
+    
+    [JsonPropertyName("configuration_id")]
+    public long? ConfigurationId { get; init; }
+    
+    [JsonPropertyName("test_design_dataset_id")]
+    public long? TestDesignDatasetId { get; init; }
+    
+    [JsonPropertyName("current_test_index")]
+    public int? CurrentTestIndex { get; init; }
+    
+    [JsonPropertyName("suite_points")]
+    public IReadOnlyList<SuiteExecutionPointRequest> SuitePoints { get; init; } = [];
 
     [JsonPropertyName("test_design_ids")]
     public IReadOnlyList<long> TestDesignIds { get; init; } = [];
@@ -2844,6 +2934,24 @@ public sealed class CreateExecutionQueueRequest
 
     [JsonPropertyName("test_suite_ids")]
     public IReadOnlyList<long> TestSuiteIds { get; init; } = [];
+    
+    [JsonPropertyName("suite_points")]
+    public IReadOnlyList<SuiteExecutionPointRequest> SuitePoints { get; init; } = [];
+}
+    
+public sealed class SuiteExecutionPointRequest
+{
+    [JsonPropertyName("test_suite_id")]
+    public long TestSuiteId { get; init; }
+
+    [JsonPropertyName("test_plan_item_suite_id")]
+    public long? TestPlanItemSuiteId { get; init; }
+
+    [JsonPropertyName("configuration_id")]
+    public long? ConfigurationId { get; init; }
+
+    [JsonPropertyName("test_design_dataset_id")]
+    public long? TestDesignDatasetId { get; init; }
 }
 
 public sealed class BulkDeleteExecutionQueuesRequest
