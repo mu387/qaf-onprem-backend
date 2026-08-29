@@ -1,5 +1,6 @@
 using System.Data;
 using Microsoft.Data.SqlClient;
+using QafOnPrem.Api.Contracts;
 
 namespace QafOnPrem.Api.Services.AppData;
 
@@ -29,6 +30,172 @@ public sealed partial class SqlAppDataService
         }
 
         return testSuiteId;
+    }
+
+    private async Task<long> ResolveExecutionIdentityAsync(
+        SqlConnection connection,
+        long clientId,
+        long testSuiteId,
+        long? executionId,
+        long? testPlanItemId,
+        long? testPlanItemSuiteId,
+        long? configurationId,
+        long? testDesignDatasetId,
+        CancellationToken cancellationToken,
+        SqlTransaction? transaction = null)
+    {
+        var resolvedExecutionId = ResolveExecutionIdentity(testSuiteId, executionId);
+        if (resolvedExecutionId != testSuiteId || testSuiteId <= 0)
+        {
+            return resolvedExecutionId;
+        }
+
+        if (testDesignDatasetId.HasValue && testDesignDatasetId.Value > 0)
+        {
+            var datasetPlanRowId = await ResolveDatasetPlanRowIdAsync(
+                connection,
+                clientId,
+                testSuiteId,
+                testPlanItemId,
+                testPlanItemSuiteId,
+                testDesignDatasetId.Value,
+                cancellationToken,
+                transaction);
+            if (datasetPlanRowId.HasValue)
+            {
+                return ToDatasetExecutionId(datasetPlanRowId.Value);
+            }
+        }
+
+        if (configurationId.HasValue && configurationId.Value > 0)
+        {
+            var assignmentId = await ResolveConfigurationAssignmentIdAsync(
+                connection,
+                clientId,
+                testSuiteId,
+                testPlanItemId,
+                testPlanItemSuiteId,
+                configurationId.Value,
+                cancellationToken,
+                transaction);
+            if (assignmentId.HasValue)
+            {
+                return ToConfigurationExecutionId(assignmentId.Value);
+            }
+        }
+
+        return resolvedExecutionId;
+    }
+
+    private async Task<long?[]> ResolveExecutionSuiteIdsAsync(
+        SqlConnection connection,
+        long clientId,
+        long? testPlanItemId,
+        IReadOnlyList<SuiteExecutionPointRequest> suitePoints,
+        CancellationToken cancellationToken,
+        SqlTransaction? transaction = null)
+    {
+        if (suitePoints.Count == 0)
+        {
+            return [];
+        }
+
+        var resolved = new List<long?>();
+        foreach (var point in suitePoints)
+        {
+            if (point.TestSuiteId <= 0)
+            {
+                continue;
+            }
+
+            resolved.Add(await ResolveExecutionIdentityAsync(
+                connection,
+                clientId,
+                point.TestSuiteId,
+                null,
+                testPlanItemId,
+                point.TestPlanItemSuiteId,
+                point.ConfigurationId,
+                point.TestDesignDatasetId,
+                cancellationToken,
+                transaction));
+        }
+
+        return resolved.ToArray();
+    }
+
+    private async Task<long?> ResolveConfigurationAssignmentIdAsync(
+        SqlConnection connection,
+        long clientId,
+        long testSuiteId,
+        long? testPlanItemId,
+        long? testPlanItemSuiteId,
+        long configurationId,
+        CancellationToken cancellationToken,
+        SqlTransaction? transaction = null)
+    {
+        const string sql = """
+            SELECT TOP 1 assign.id
+            FROM test_plan_item_suite_configurations assign
+            INNER JOIN test_plan_item_suites parent ON parent.id = assign.test_plan_item_suite_id
+            INNER JOIN test_plan_items tpi ON tpi.id = parent.test_plan_item_id
+            INNER JOIN test_plans tp ON tp.id = tpi.test_plan_id
+            WHERE tp.client_id = @clientId
+              AND parent.deleted_at IS NULL
+              AND assign.deleted_at IS NULL
+              AND parent.test_design_id = @testSuiteId
+              AND assign.configuration_id = @configurationId
+              AND (@testPlanItemId IS NULL OR parent.test_plan_item_id = @testPlanItemId)
+              AND (@testPlanItemSuiteId IS NULL OR parent.id = @testPlanItemSuiteId)
+            ORDER BY assign.id DESC;
+            """;
+
+        await using var command = CreateCommand(connection, sql);
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("@clientId", clientId);
+        command.Parameters.AddWithValue("@testSuiteId", testSuiteId);
+        command.Parameters.AddWithValue("@configurationId", configurationId);
+        command.Parameters.AddWithValue("@testPlanItemId", (object?)testPlanItemId ?? DBNull.Value);
+        command.Parameters.AddWithValue("@testPlanItemSuiteId", (object?)testPlanItemSuiteId ?? DBNull.Value);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null || value is DBNull ? null : Convert.ToInt64(value);
+    }
+
+    private async Task<long?> ResolveDatasetPlanRowIdAsync(
+        SqlConnection connection,
+        long clientId,
+        long testSuiteId,
+        long? testPlanItemId,
+        long? testPlanItemSuiteId,
+        long testDesignDatasetId,
+        CancellationToken cancellationToken,
+        SqlTransaction? transaction = null)
+    {
+        const string sql = """
+            SELECT TOP 1 variant.id
+            FROM test_plan_item_suite_datasets variant
+            INNER JOIN test_plan_item_suites parent ON parent.id = variant.test_plan_item_suite_id
+            INNER JOIN test_plan_items tpi ON tpi.id = parent.test_plan_item_id
+            INNER JOIN test_plans tp ON tp.id = tpi.test_plan_id
+            WHERE tp.client_id = @clientId
+              AND parent.deleted_at IS NULL
+              AND variant.deleted_at IS NULL
+              AND parent.test_design_id = @testSuiteId
+              AND variant.test_design_dataset_id = @testDesignDatasetId
+              AND (@testPlanItemId IS NULL OR parent.test_plan_item_id = @testPlanItemId)
+              AND (@testPlanItemSuiteId IS NULL OR parent.id = @testPlanItemSuiteId)
+            ORDER BY variant.id DESC;
+            """;
+
+        await using var command = CreateCommand(connection, sql);
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("@clientId", clientId);
+        command.Parameters.AddWithValue("@testSuiteId", testSuiteId);
+        command.Parameters.AddWithValue("@testDesignDatasetId", testDesignDatasetId);
+        command.Parameters.AddWithValue("@testPlanItemId", (object?)testPlanItemId ?? DBNull.Value);
+        command.Parameters.AddWithValue("@testPlanItemSuiteId", (object?)testPlanItemSuiteId ?? DBNull.Value);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null || value is DBNull ? null : Convert.ToInt64(value);
     }
 
     private async Task EnsurePointBasedConfigurationStateAsync(SqlConnection connection, long? testPlanItemId, CancellationToken cancellationToken, SqlTransaction? transaction = null)
