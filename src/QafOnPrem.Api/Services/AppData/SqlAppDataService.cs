@@ -4671,6 +4671,7 @@ public sealed partial class SqlAppDataService(
                 td.test_suite_type,
                 td.folder_path_id,
                 td.comment,
+                td.overview,
                 td.project_id,
                 td.azure_iteration_path,
                 td.priority,
@@ -4705,6 +4706,7 @@ public sealed partial class SqlAppDataService(
                 TestSuiteType = GetInt32(reader, "test_suite_type"),
                 FolderPathId = GetInt64(reader, "folder_path_id"),
                 Comment = GetString(reader, "comment"),
+                Overview = GetString(reader, "overview"),
                 ProjectId = GetInt64(reader, "project_id"),
                 IterationPath = GetString(reader, "azure_iteration_path"),
                 Priority = GetString(reader, "priority"),
@@ -4729,6 +4731,7 @@ public sealed partial class SqlAppDataService(
             TestSuiteType = suite.TestSuiteType,
             FolderPathId = suite.FolderPathId,
             Comment = suite.Comment,
+            Overview = suite.Overview,
             ProjectId = suite.ProjectId,
             IterationPath = suite.IterationPath,
             Priority = suite.Priority,
@@ -5124,6 +5127,7 @@ public sealed partial class SqlAppDataService(
                 TestSuiteType = request.TestSuiteType,
                 FolderPathId = request.FolderPathId,
                 Comment = NormalizeOptionalText(request.Comment),
+                Overview = NormalizeOptionalText(request.Overview),
                 ProjectId = request.ProjectId,
                 IterationPath = NormalizeOptionalText(request.IterationPath),
                 Priority = NormalizeOptionalText(request.Priority),
@@ -5471,6 +5475,8 @@ public sealed partial class SqlAppDataService(
                         Id = linkId,
                         ExecutionId = GetInt64(reader, "test_design_id") ?? linkId,
                         TestDesignId = GetInt64(reader, "test_design_id"),
+                        TestPlanItemSuiteId = linkId,
+                        ConfigurationId = configurationId,
                         ParentId = null,
                         Status = GetInt64(reader, "status_ref_id") is long statusId ? new BasicRefDto { Id = statusId, Name = GetString(reader, "status_name") } : null,
                         Suite = new SuiteLightDto
@@ -5495,6 +5501,8 @@ public sealed partial class SqlAppDataService(
                     Id = ToConfigurationExecutionId(assignmentRow.AssignmentId),
                     ExecutionId = ToConfigurationExecutionId(assignmentRow.AssignmentId),
                     TestDesignId = assignmentRow.BaseTestDesignId,
+                    TestPlanItemSuiteId = assignmentRow.ParentSuiteLinkId,
+                    ConfigurationId = assignmentRow.ConfigurationId,
                     ParentId = assignmentRow.ParentSuiteLinkId,
                     Status = assignmentRow.StatusId.HasValue ? new BasicRefDto { Id = assignmentRow.StatusId.Value, Name = assignmentRow.StatusName } : null,
                     Suite = new SuiteLightDto
@@ -5521,6 +5529,10 @@ public sealed partial class SqlAppDataService(
                     Id = ToDatasetRowId(datasetRow.DatasetPlanRowId),
                     ExecutionId = ToDatasetExecutionId(datasetRow.DatasetPlanRowId),
                     TestDesignId = datasetRow.BaseTestDesignId,
+                    TestPlanItemSuiteId = datasetRow.ParentSuiteLinkId,
+                    ConfigurationId = datasetRow.ConfigurationId,
+                    TestDesignDatasetId = datasetRow.DatasetId,
+                    DatasetScenario = datasetRow.Scenario,
                     ParentId = datasetRow.ParentSuiteLinkId,
                     Status = datasetRow.StatusId.HasValue ? new BasicRefDto { Id = datasetRow.StatusId.Value, Name = datasetRow.StatusName } : null,
                     Suite = new SuiteLightDto
@@ -5557,6 +5569,10 @@ public sealed partial class SqlAppDataService(
                     Id = entry.Row.Id,
                     ExecutionId = entry.Row.ExecutionId,
                     TestDesignId = entry.Row.TestDesignId,
+                    TestPlanItemSuiteId = entry.Row.TestPlanItemSuiteId,
+                    ConfigurationId = entry.Row.ConfigurationId,
+                    TestDesignDatasetId = entry.Row.TestDesignDatasetId,
+                    DatasetScenario = entry.Row.DatasetScenario,
                     ParentId = entry.Row.ParentId,
                     Status = entry.Row.Status,
                     IsPaused = pausedSuiteMap.TryGetValue(entry.Row.ExecutionId, out var isPaused)
@@ -5585,19 +5601,23 @@ public sealed partial class SqlAppDataService(
             return null;
         }
 
-        var requestedSuiteIds = request.TestSuites
-            .Where(id => id != 0)
-            .Distinct()
-            .ToArray();
-
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await EnsurePointBasedConfigurationStateAsync(connection, request.TestPlanItemId, cancellationToken);
+        await EnsureTestLevelDatasetsSchemaAsync(connection, cancellationToken);
+        var requestedSuiteIds = request.SuitePoints.Count > 0
+            ? (await ResolveExecutionSuiteIdsAsync(connection, context.ClientId.Value, request.TestPlanItemId, request.SuitePoints, cancellationToken))
+                .Where(id => id.HasValue && id.Value != 0)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToArray()
+            : request.TestSuites
+                .Where(id => id != 0)
+                .Distinct()
+                .ToArray();
         if (requestedSuiteIds.Length == 0)
         {
             return new TestRunnerPayloadDto();
         }
-
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await EnsurePointBasedConfigurationStateAsync(connection, request.TestPlanItemId, cancellationToken);
-        await EnsureTestLevelDatasetsSchemaAsync(connection, cancellationToken);
         var suites = await LoadRunnerSuitesAsync(connection, context.ClientId.Value, requestedSuiteIds, cancellationToken);
         if (suites.Count == 0)
         {
@@ -5768,7 +5788,7 @@ public sealed partial class SqlAppDataService(
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await EnsurePointBasedConfigurationStateAsync(connection, request.TestPlanItemId, cancellationToken);
-        var executionId = ResolveExecutionIdentity(request.TestSuiteId, request.ExecutionId);
+        var executionId = await ResolveExecutionIdentityAsync(connection, context.ClientId.Value, request.TestSuiteId, request.ExecutionId, request.TestPlanItemId, request.TestPlanItemSuiteId, request.ConfigurationId, request.TestDesignDatasetId, cancellationToken);
         var runnerItem = await LoadRunnerItemRecordAsync(connection, context.ClientId.Value, request.TestRunnerId, request.TestPlanItemId, executionId, cancellationToken);
         if (runnerItem is not RunnerItemRecord runnerItemValue)
         {
@@ -8960,6 +8980,7 @@ public sealed partial class SqlAppDataService(
                 td.test_suite_type,
                 td.folder_path_id,
                 td.comment,
+                td.overview,
                 td.project_id,
                 td.priority,
                 td.story_id,
@@ -8993,6 +9014,7 @@ public sealed partial class SqlAppDataService(
                     TestSuiteType = GetInt32(reader, "test_suite_type"),
                     FolderPathId = GetInt64(reader, "folder_path_id"),
                     Comment = GetString(reader, "comment"),
+                    Overview = GetString(reader, "overview"),
                     ProjectId = GetInt64(reader, "project_id"),
                     Priority = GetString(reader, "priority"),
                     StoryId = GetString(reader, "story_id"),
@@ -9028,6 +9050,7 @@ public sealed partial class SqlAppDataService(
                 TestSuiteType = suite.TestSuiteType,
                 FolderPathId = suite.FolderPathId,
                 Comment = suite.Comment,
+                Overview = suite.Overview,
                 ProjectId = suite.ProjectId,
                 Priority = suite.Priority,
                 StoryId = suite.StoryId,
@@ -9323,9 +9346,16 @@ public sealed partial class SqlAppDataService(
             {
                 Id = suite.RuntimeSuiteId == 0 ? suite.Id : suite.RuntimeSuiteId,
                 BaseTestSuiteId = suite.Id,
+                TestPlanItemSuiteId = suite.TestPlanItemSuiteId,
                 Name = suite.Title,
                 Videos = JsonSerializer.SerializeToElement(Array.Empty<string>()),
                 Prereq = suite.Comment,
+                Overview = suite.Overview,
+                ConfigurationId = suite.ConfigurationId,
+                TestDesignDatasetId = suite.SelectedDatasetId,
+                DatasetScenario = suite.SelectedDatasetId.HasValue
+                    ? suite.Datasets.FirstOrDefault(row => row.Id == suite.SelectedDatasetId.Value)?.Scenario
+                    : null,
                 Configuration = configuration
             },
             Steps = steps
@@ -9605,11 +9635,11 @@ public sealed partial class SqlAppDataService(
         var contexts = await LoadExecutionSuiteContextsAsync(connection, clientId, executionIds, cancellationToken);
         var contextMap = contexts.ToDictionary(row => row.ExecutionId);
         var baseSuiteIds = contexts.Select(row => row.BaseTestDesignId).Distinct().ToArray();
-        var baseSuiteInfo = new Dictionary<long, (string? Title, string? Comment, long? ConfigurationId)>();
+        var baseSuiteInfo = new Dictionary<long, (string? Title, string? Comment, string? Overview, long? ConfigurationId)>();
         if (baseSuiteIds.Length > 0)
         {
             var parameters = AddIdListParameterValues(baseSuiteIds, "@suiteId");
-            var baseSql = $"SELECT id, title, comment, configuration_id FROM test_designs WHERE id IN ({string.Join(", ", parameters.Select(parameter => parameter.ParameterName))});";
+            var baseSql = $"SELECT id, title, comment, overview, configuration_id FROM test_designs WHERE id IN ({string.Join(", ", parameters.Select(parameter => parameter.ParameterName))});";
             await using var baseCommand = CreateCommand(connection, baseSql);
             AddParameters(baseCommand, parameters);
             await using var baseReader = await baseCommand.ExecuteReaderAsync(cancellationToken);
@@ -9618,6 +9648,7 @@ public sealed partial class SqlAppDataService(
                 baseSuiteInfo[baseReader.GetInt64(baseReader.GetOrdinal("id"))] = (
                     GetString(baseReader, "title"),
                     GetString(baseReader, "comment"),
+                    GetString(baseReader, "overview"),
                     GetInt64(baseReader, "configuration_id"));
             }
         }
@@ -9643,9 +9674,14 @@ public sealed partial class SqlAppDataService(
                 {
                     Id = item.TestSuiteId,
                     BaseTestSuiteId = baseSuiteId,
+                    TestPlanItemSuiteId = context.TestPlanItemSuiteId,
                     Name = item.TestSuiteName ?? info.Title,
                     Videos = ParseJsonElementOrDefault(item.VideosJson, Array.Empty<string>()),
                     Prereq = info.Comment,
+                    Overview = info.Overview,
+                    ConfigurationId = configurationId,
+                    TestDesignDatasetId = context.DatasetId,
+                    DatasetScenario = context.DatasetScenario,
                     Configuration = configurationId.HasValue && configurationMap.TryGetValue(configurationId.Value, out var configuration)
                         ? configuration
                         : null
@@ -9686,9 +9722,16 @@ public sealed partial class SqlAppDataService(
             {
                 Id = suite.RuntimeSuiteId == 0 ? suite.Id : suite.RuntimeSuiteId,
                 BaseTestSuiteId = suite.Id,
+                TestPlanItemSuiteId = suite.TestPlanItemSuiteId,
                 Name = suite.Title,
                 Videos = ParseJsonElementOrDefault(pausedRunnerItem.VideosJson, Array.Empty<string>()),
                 Prereq = suite.Comment,
+                Overview = suite.Overview,
+                ConfigurationId = suite.ConfigurationId,
+                TestDesignDatasetId = suite.SelectedDatasetId,
+                DatasetScenario = suite.SelectedDatasetId.HasValue
+                    ? suite.Datasets.FirstOrDefault(row => row.Id == suite.SelectedDatasetId.Value)?.Scenario
+                    : null,
                 Configuration = configuration
             },
             Steps = DeserializeRunnerSteps(pausedRunnerItem.StepsJson)
@@ -10525,6 +10568,7 @@ public sealed partial class SqlAppDataService(
                 azure_iteration_path = @iterationPath,
                 priority = @priority,
                 story_id = @storyId,
+                overview = @overview,
                 test_title = @testTitle,
                 tags = @tags,
                 comment = @comment,
@@ -10550,6 +10594,7 @@ public sealed partial class SqlAppDataService(
         command.Parameters.AddWithValue("@iterationPath", (object?)NormalizeOptionalText(details.IterationPath) ?? DBNull.Value);
         command.Parameters.AddWithValue("@priority", (object?)NormalizeOptionalText(details.Priority) ?? DBNull.Value);
         command.Parameters.AddWithValue("@storyId", (object?)NormalizeOptionalText(details.StoryId) ?? DBNull.Value);
+        command.Parameters.AddWithValue("@overview", (object?)NormalizeOptionalText(details.Overview) ?? DBNull.Value);
         command.Parameters.AddWithValue("@testTitle", (object?)NormalizeOptionalText(details.TestTitle) ?? DBNull.Value);
         command.Parameters.AddWithValue("@tags", (object?)NormalizeSuiteTags(details.Tags) ?? DBNull.Value);
         command.Parameters.AddWithValue("@comment", (object?)NormalizeOptionalText(details.Comment) ?? DBNull.Value);
@@ -11048,6 +11093,7 @@ public sealed partial class SqlAppDataService(
                     azure_iteration_path = @iterationPath,
                     priority = @priority,
                     story_id = @storyId,
+                    overview = @overview,
                     test_title = @testTitle,
                     tags = @tags,
                     comment = @comment,
@@ -11099,6 +11145,7 @@ public sealed partial class SqlAppDataService(
                     azure_iteration_path,
                     priority,
                     story_id,
+                    overview,
                     test_title,
                     tags,
                     comment,
@@ -11123,6 +11170,7 @@ public sealed partial class SqlAppDataService(
                     @iterationPath,
                     @priority,
                     @storyId,
+                    @overview,
                     @testTitle,
                     @tags,
                     @comment,
@@ -13376,3 +13424,5 @@ public sealed partial class SqlAppDataService(
     private const string XPathReplaceVariable = "{{var}}";
     private const string LowercaseChars = "abcdefghijklmnopqrstuvwxyz";
 }
+
+
