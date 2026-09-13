@@ -11119,6 +11119,7 @@ public sealed partial class SqlAppDataService(
                 updateCommand.Parameters.AddWithValue("@iterationPath", (object?)NormalizeOptionalText(details.IterationPath) ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@priority", (object?)NormalizeOptionalText(details.Priority) ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@storyId", (object?)NormalizeOptionalText(details.StoryId) ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("@overview", (object?)NormalizeOptionalText(details.Overview) ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@testTitle", (object?)NormalizeOptionalText(details.TestTitle) ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@tags", (object?)normalizedTags ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@comment", (object?)NormalizeOptionalText(details.Comment) ?? DBNull.Value);
@@ -11750,27 +11751,19 @@ public sealed partial class SqlAppDataService(
             UPDATE test_plan_item_suites
             SET status_id = @statusId,
                 updated_at = SYSUTCDATETIME()
-            WHERE deleted_at IS NULL AND test_design_id IN ({string.Join(", ", placeholders)});
+            WHERE deleted_at IS NULL
+                AND status_id <> @inProgressStatusId
+                AND test_design_id IN ({string.Join(", ", placeholders)});
             """;
 
         await using (var updateCommand = CreateCommand(connection, updateSql))
         {
             updateCommand.Transaction = transaction;
             updateCommand.Parameters.AddWithValue("@statusId", NotStartedStatusId);
+            updateCommand.Parameters.AddWithValue("@inProgressStatusId", InProgressStatusId);
             AddParameters(updateCommand, parameters);
             await updateCommand.ExecuteNonQueryAsync(cancellationToken);
         }
-
-        var deleteSql = $"""
-            DELETE FROM test_runner_items
-            WHERE status_id = @statusId AND test_suite_id IN ({string.Join(", ", placeholders)});
-            """;
-
-        await using var deleteCommand = CreateCommand(connection, deleteSql);
-        deleteCommand.Transaction = transaction;
-        deleteCommand.Parameters.AddWithValue("@statusId", InProgressStatusId);
-        AddParameters(deleteCommand, parameters.Select(parameter => new SqlParameter(parameter.ParameterName, parameter.Value)).ToList());
-        await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task<List<long>> LoadChildSuiteIdsAsync(SqlConnection connection, long clientId, long testSuiteId, CancellationToken cancellationToken)
